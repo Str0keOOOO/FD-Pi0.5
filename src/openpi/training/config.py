@@ -137,14 +137,8 @@ class ModelTransformFactory(GroupFactory):
                     ],
                 )
             case _model.ModelType.PI0_FAST:
-                tokenizer_cls = (
-                    _tokenizer.FASTTokenizer
-                    if model_config.fast_model_tokenizer is None
-                    else model_config.fast_model_tokenizer
-                )
-                tokenizer_kwargs = (
-                    {} if model_config.fast_model_tokenizer_kwargs is None else model_config.fast_model_tokenizer_kwargs
-                )
+                tokenizer_cls = _tokenizer.FASTTokenizer if model_config.fast_model_tokenizer is None else model_config.fast_model_tokenizer
+                tokenizer_kwargs = {} if model_config.fast_model_tokenizer_kwargs is None else model_config.fast_model_tokenizer_kwargs
                 return _transforms.Group(
                     inputs=[
                         _transforms.InjectDefaultPrompt(self.default_prompt),
@@ -305,6 +299,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
                         "observation/image": "image",
                         "observation/wrist_image": "wrist_image",
                         "observation/state": "state",
+                        "observation/force": "force",
                         "actions": "actions",
                         "prompt": "prompt",
                     }
@@ -690,9 +685,7 @@ _CONFIGS = [
         # We have a convenience function in the model config that returns the default freeze filter
         # for the given model config for LoRA finetuning. Just make sure it matches the model config
         # you chose above.
-        freeze_filter=pi0_config.Pi0Config(
-            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
-        ).get_freeze_filter(),
+        freeze_filter=pi0_config.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora").get_freeze_filter(),
         # Turn off EMA for LoRA finetuning.
         ema_decay=None,
     ),
@@ -722,9 +715,7 @@ _CONFIGS = [
         name="pi0_fast_libero_low_mem_finetune",
         # Here is an example of loading a pi0-FAST model for LoRA finetuning.
         # For setting action_dim, action_horizon, and max_token_len, see the comments above.
-        model=pi0_fast.Pi0FASTConfig(
-            action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"
-        ),
+        model=pi0_fast.Pi0FASTConfig(action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
             base_config=DataConfig(prompt_from_task=True),
@@ -734,9 +725,7 @@ _CONFIGS = [
         num_train_steps=30_000,
         # Again, make sure to match the model config above when extracting the freeze filter
         # that specifies which parameters should be frozen during LoRA finetuning.
-        freeze_filter=pi0_fast.Pi0FASTConfig(
-            action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"
-        ).get_freeze_filter(),
+        freeze_filter=pi0_fast.Pi0FASTConfig(action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora").get_freeze_filter(),
         # Turn off EMA for LoRA finetuning.
         ema_decay=None,
     ),
@@ -759,6 +748,44 @@ _CONFIGS = [
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero_fdm_wo",  # <-- 训练时用这个名字
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False, force_mode="raw"),
+        data=LeRobotLiberoDataConfig(
+            repo_id="/mnt/c/Users/Administrator/Desktop/libero_10_with_force_lerobot",  # 替换为您自己的数据集
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/mnt/c/Users/Administrator/Desktop/pi05_libero/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero_fdm",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False, force_mode="fdm"),
+        data=LeRobotLiberoDataConfig(
+            repo_id="/mnt/c/Users/Administrator/Desktop/libero_10_with_force_lerobot",  # 替换为您自己的数据集
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/mnt/c/Users/Administrator/Desktop/pi05_libero/params"),
         num_train_steps=30_000,
     ),
     #

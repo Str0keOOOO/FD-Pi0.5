@@ -24,32 +24,34 @@ def main(input_dir: str, output_dir: str):
         robot_type="panda",
         fps=10,
         features={
-            "observation.image": {
+            "image": {
                 "dtype": "image",
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
             },
-            "observation.wrist_image": {
+            "wrist_image": {
                 "dtype": "image",
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
             },
-            "observation.state": {
+            "state": {
                 "dtype": "float32",
                 "shape": (8,),
-                "names": ["state"],
+                "names": ["x", "y", "z", "rx", "ry", "rz", "gripper_0", "gripper_1"],
             },
-            "observation.force": {
+            "force": {
                 "dtype": "float32",
                 "shape": (6,),
                 "names": ["fx", "fy", "fz", "tx", "ty", "tz"],
             },
-            "action": {
+            "actions": {
                 "dtype": "float32",
                 "shape": (7,),
-                "names": ["action"],
+                "names": ["x", "y", "z", "rx", "ry", "rz", "gripper"],
             },
         },
+        image_writer_threads=10,
+        image_writer_processes=5,
     )
 
     hdf5_files = [f for f in os.listdir(input_dir) if f.endswith(".hdf5")]
@@ -101,11 +103,11 @@ def main(input_dir: str, output_dir: str):
                 for t in range(num_steps):
                     dataset.add_frame(
                         {
-                            "observation.image": images[t],
-                            "observation.wrist_image": wrist_images[t],
-                            "observation.state": states[t],
-                            "observation.force": forces[t],
-                            "action": actions[t],
+                            "image": images[t],
+                            "wrist_image": wrist_images[t],
+                            "state": states[t],
+                            "force": forces[t],
+                            "actions": actions[t],
                             "task": task_msg,
                         }
                     )

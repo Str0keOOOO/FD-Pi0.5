@@ -94,6 +94,7 @@ class Observation(Generic[ArrayT]):
     # Low-dimensional robot state.
     state: at.Float[ArrayT, "*b s"]
 
+    force: at.Float[ArrayT, "*b f"] | None = None
     # Tokenized prompt.
     tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
     # Tokenized prompt mask.
@@ -122,6 +123,7 @@ class Observation(Generic[ArrayT]):
             images=data["image"],
             image_masks=data["image_mask"],
             state=data["state"],
+            force=data["force"],
             tokenized_prompt=data.get("tokenized_prompt"),
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),

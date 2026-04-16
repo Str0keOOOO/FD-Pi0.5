@@ -33,6 +33,14 @@ class Pi0Config(_model.BaseModelConfig):
     discrete_state_input: bool = None  # type: ignore
 
     pytorch_compile_mode: str | None = "max-autotune"
+    # ==========================================
+    # 可选值:
+    #   - "none" : 原版 pi0.5 (Baseline)
+    #   - "raw"  : 直接用 MLP 编码 6 维真实力 (pi0.5 FDM w/o)
+    #   - "fdm"  : 使用交叉注意力预测力 (您的核心创新)
+    # ==========================================
+    force_mode: str = "none"
+    force_loss_weight: float = 10.0
 
     def __post_init__(self):
         if self.max_token_len is None:
@@ -78,6 +86,7 @@ class Pi0Config(_model.BaseModelConfig):
                     "right_wrist_0_rgb": image_mask_spec,
                 },
                 state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
+                force=jax.ShapeDtypeStruct([batch_size, 6], jnp.float32),
                 tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),
                 tokenized_prompt_mask=jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool),
             )
@@ -87,31 +96,13 @@ class Pi0Config(_model.BaseModelConfig):
 
     def get_freeze_filter(self) -> nnx.filterlib.Filter:
         """Returns the freeze filter based on the model config."""
-        filters = []
-        has_lora = False
-        gemma_params_filter = nnx_utils.PathRegex(".*llm.*")
-        action_expert_params_filter = nnx_utils.PathRegex(".*llm.*_1.*")
-        if "lora" in self.paligemma_variant:
-            filters.append(
-                gemma_params_filter,
-            )
-            if "lora" not in self.action_expert_variant:
-                # If only freeze gemma params, exclude action expert params.
-                filters.append(
-                    nnx.Not(action_expert_params_filter),
-                )
-            has_lora = True
-        elif "lora" in self.action_expert_variant:
-            filters.append(
-                action_expert_params_filter,
-            )
-            has_lora = True
+        siglip_filter = nnx_utils.PathRegex(".*img.*")
+        vlm_backbone_filter = nnx_utils.PathRegex(".*llm.*_0.*")
 
-        if has_lora:
-            # If any lora is used, exclude all lora params.
-            filters.append(
-                nnx.Not(nnx_utils.PathRegex(".*lora.*")),
-            )
-        if not filters:
-            return nnx.Nothing
-        return nnx.All(*filters)
+        trainable_regex = ".*(fdm|fdm_state_proj|raw_force_proj|state_proj|action_in_proj|action_out_proj|time_mlp|llm.*_1).*"
+        trainable_filter = nnx_utils.PathRegex(trainable_regex)
+
+        return nnx.All(
+            nnx.Any(siglip_filter, vlm_backbone_filter), # 命中黑名单
+            nnx.Not(trainable_filter)                    # 且不在白名单内
+        )
