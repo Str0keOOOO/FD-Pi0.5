@@ -1,103 +1,117 @@
-"""
-Minimal example script for converting a dataset to LeRobot format.
+import json
+import os
+from pathlib import Path
 
-We use the Libero dataset (stored in RLDS) for this example, but it can be easily
-modified for any other data you have saved in a custom format.
-
-Usage:
-uv run examples/libero/convert_libero_data_to_lerobot.py --data_dir /path/to/your/data
-
-If you want to push your dataset to the Hugging Face Hub, you can use the following command:
-uv run examples/libero/convert_libero_data_to_lerobot.py --data_dir /path/to/your/data --push_to_hub
-
-Note: to run the script, you need to install tensorflow_datasets:
-`uv pip install tensorflow tensorflow_datasets`
-
-You can download the raw Libero datasets from https://huggingface.co/datasets/openvla/modified_libero_rlds
-The resulting dataset will get saved to the $HF_LEROBOT_HOME directory.
-Running this conversion script will take approximately 30 minutes.
-"""
-
-import shutil
-
-from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-import tensorflow_datasets as tfds
+import h5py
+import numpy as np
 import tyro
+from PIL import Image
 
-REPO_NAME = "your_hf_username/libero"  # Name of the output dataset, also used for the Hugging Face Hub
-RAW_DATASET_NAMES = [
-    "libero_10_no_noops",
-    "libero_goal_no_noops",
-    "libero_object_no_noops",
-    "libero_spatial_no_noops",
-]  # For simplicity we will combine multiple Libero datasets into one training dataset
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 
-def main(data_dir: str, *, push_to_hub: bool = False):
-    # Clean up any existing dataset in the output directory
-    output_path = HF_LEROBOT_HOME / REPO_NAME
-    if output_path.exists():
-        shutil.rmtree(output_path)
+def main(input_dir: str, output_dir: str):
+    """
+    将带力矩的 LIBERO HDF5 数据集转换为纯本地的 LeRobot 格式。
 
-    # Create LeRobot dataset, define features to store
-    # OpenPi assumes that proprio is stored in `state` and actions in `action`
-    # LeRobot assumes that dtype of image data is `image`
+    :param data_dir: 包含预处理后 HDF5 文件的输入目录。
+    :param output_dir: 生成的 LeRobot 数据集要保存的本地完整路径。
+    """
+    print(f"初始化本地 LeRobot 数据集，保存路径: {output_dir}")
     dataset = LeRobotDataset.create(
-        repo_id=REPO_NAME,
+        repo_id="fd-pi0.5/libero_10_force_lerobot",
+        root=output_dir,
         robot_type="panda",
         fps=10,
         features={
-            "image": {
+            "observation.image": {
                 "dtype": "image",
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
             },
-            "wrist_image": {
+            "observation.wrist_image": {
                 "dtype": "image",
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
             },
-            "state": {
+            "observation.state": {
                 "dtype": "float32",
                 "shape": (8,),
                 "names": ["state"],
             },
-            "actions": {
+            "observation.force": {
+                "dtype": "float32",
+                "shape": (6,),
+                "names": ["fx", "fy", "fz", "tx", "ty", "tz"],
+            },
+            "action": {
                 "dtype": "float32",
                 "shape": (7,),
-                "names": ["actions"],
+                "names": ["action"],
             },
         },
-        image_writer_threads=10,
-        image_writer_processes=5,
     )
 
-    # Loop over raw Libero datasets and write episodes to the LeRobot dataset
-    # You can modify this for your own data format
-    for raw_dataset_name in RAW_DATASET_NAMES:
-        raw_dataset = tfds.load(raw_dataset_name, data_dir=data_dir, split="train")
-        for episode in raw_dataset:
-            for step in episode["steps"].as_numpy_iterator():
-                dataset.add_frame(
-                    {
-                        "image": step["observation"]["image"],
-                        "wrist_image": step["observation"]["wrist_image"],
-                        "state": step["observation"]["state"],
-                        "actions": step["action"],
-                        "task": step["language_instruction"].decode(),
-                    }
-                )
-            dataset.save_episode()
+    hdf5_files = [f for f in os.listdir(input_dir) if f.endswith(".hdf5")]
+    print(f"找到 {len(hdf5_files)} 个 HDF5 文件待处理...")
 
-    # Optionally push to the Hugging Face Hub
-    if push_to_hub:
-        dataset.push_to_hub(
-            tags=["libero", "panda", "rlds"],
-            private=False,
-            push_videos=True,
-            license="apache-2.0",
-        )
+    for file_name in hdf5_files:
+        file_path = os.path.join(input_dir, file_name)
+
+        with h5py.File(file_path, "r") as f:
+            demos = list(f["data"].keys())
+            for demo in demos:
+                images = f[f"data/{demo}/obs/agentview_rgb"][:]
+                wrist_images = f[f"data/{demo}/obs/eye_in_hand_rgb"][:]
+                images = np.stack(
+                    [
+                        np.asarray(
+                            Image.fromarray(frame.astype(np.uint8)).resize((256, 256), resample=Image.BILINEAR),
+                            dtype=np.uint8,
+                        )
+                        for frame in images
+                    ],
+                    axis=0,
+                )
+                wrist_images = np.stack(
+                    [
+                        np.asarray(
+                            Image.fromarray(frame.astype(np.uint8)).resize((256, 256), resample=Image.BILINEAR),
+                            dtype=np.uint8,
+                        )
+                        for frame in wrist_images
+                    ],
+                    axis=0,
+                )
+
+                ee_states = f[f"data/{demo}/obs/ee_states"][:]
+                gripper_states = f[f"data/{demo}/obs/gripper_states"][:]
+                states = np.concatenate([ee_states, gripper_states], axis=-1).astype(np.float32)
+
+                actions = f[f"data/{demo}/actions"][:].astype(np.float32)
+                forces = f[f"data/{demo}/obs/robot0_eef_force"][:].astype(np.float32)
+
+                env_args = f["data"].attrs.get("env_args", "{}")
+                env_args = json.loads(env_args)["bddl_file"]
+                no_suffix = Path(env_args).stem
+                task_msg = str(no_suffix)
+                print(f"Processing demo: {demo}, task info: {task_msg}")
+
+                num_steps = actions.shape[0]
+                for t in range(num_steps):
+                    dataset.add_frame(
+                        {
+                            "observation.image": images[t],
+                            "observation.wrist_image": wrist_images[t],
+                            "observation.state": states[t],
+                            "observation.force": forces[t],
+                            "action": actions[t],
+                            "task": task_msg,
+                        }
+                    )
+                dataset.save_episode()
+
+    print(f"\n✅ 转换完成！本地数据集已成功保存至: {output_dir}")
 
 
 if __name__ == "__main__":
