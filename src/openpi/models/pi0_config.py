@@ -40,6 +40,7 @@ class Pi0Config(_model.BaseModelConfig):
     #   - "fdm"  : 使用交叉注意力预测力 (您的核心创新)
     # ==========================================
     force_mode: str = "none"
+    use_actual_force_for_vlm: bool = False
     force_loss_weight: float = 10.0
 
     def __post_init__(self):
@@ -99,7 +100,8 @@ class Pi0Config(_model.BaseModelConfig):
         siglip_filter = nnx_utils.PathRegex(".*img.*")
         vlm_backbone_filter = nnx_utils.PathRegex(".*llm.*_0.*")
 
-        trainable_regex = ".*(fdm|fdm_state_proj|raw_force_proj|state_proj|action_in_proj|action_out_proj|time_mlp|llm.*_1).*"
+        trainable_regex = ".*(fdm|fdm_state_proj|raw_force_proj|actual_force_proj|state_proj|action_in_proj|action_out_proj|time_mlp|llm.*_1).*"
+
         trainable_filter = nnx_utils.PathRegex(trainable_regex)
 
         return nnx.All(

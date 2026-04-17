@@ -751,7 +751,7 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
-        name="pi05_libero_fdm_wo",  # <-- 训练时用这个名字
+        name="pi05_libero_fdm_wo",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False, force_mode="raw"),
         data=LeRobotLiberoDataConfig(
             repo_id="/mnt/c/Users/Administrator/Desktop/libero_10_with_force_lerobot",  # 替换为您自己的数据集
@@ -770,8 +770,27 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
-        name="pi05_libero_fdm",
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False, force_mode="fdm"),
+        name="pi05_libero_fdm_sensor_free",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False, force_mode="fdm",use_actual_force_for_vlm=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="/mnt/c/Users/Administrator/Desktop/libero_10_with_force_lerobot",  # 替换为您自己的数据集
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/mnt/c/Users/Administrator/Desktop/pi05_libero/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero_fdm_upper_bound",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False, force_mode="fdm",use_actual_force_for_vlm=True),
         data=LeRobotLiberoDataConfig(
             repo_id="/mnt/c/Users/Administrator/Desktop/libero_10_with_force_lerobot",  # 替换为您自己的数据集
             base_config=DataConfig(prompt_from_task=True),

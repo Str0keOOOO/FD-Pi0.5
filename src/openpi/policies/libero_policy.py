@@ -100,7 +100,4 @@ class LiberoOutputs(transforms.DataTransformFn):
         # For your own dataset, replace `7` with the action dimension of your dataset.
         output = {"actions": np.asarray(data["actions"][:, :7])}
 
-        if "predicted_force" in data:
-            output["predicted_force"] = np.asarray(data["predicted_force"])
-
         return output

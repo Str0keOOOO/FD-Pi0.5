@@ -60,20 +60,38 @@ def posemb_sincos(pos: at.Real[at.Array, " b"], embedding_dim: int, min_period: 
     )
     return jnp.concatenate([jnp.sin(sinusoid_input), jnp.cos(sinusoid_input)], axis=-1)
 
+class MLP(nnx.Module):
+    """通用的两层前馈神经网络 (FFN/MLP)"""
+    def __init__(self, in_dim: int, out_dim: int, rngs: nnx.Rngs):
+        hidden_dim = out_dim * 2
+        self.l1 = nnx.Linear(in_dim, hidden_dim, rngs=rngs)
+        self.l2 = nnx.Linear(hidden_dim, out_dim, rngs=rngs)
+
+    def __call__(self, x):
+        x = self.l1(x)
+        x = nnx.swish(x)
+        x = self.l2(x)
+        return x
 
 class ForceDistillationModule(nnx.Module):
     def __init__(self, hidden_dim: int, rngs: nnx.Rngs):
         self.force_query = nnx.Param(jax.random.normal(rngs.params(), (1, 1, hidden_dim)) * 0.02)
-        self.cross_attn = nnx.MultiHeadAttention(num_heads=8,in_features=hidden_dim,out_features=hidden_dim,rngs=rngs)
-        self.decoder = nnx.Linear(hidden_dim, 6, rngs=rngs)
+        self.cross_attn = nnx.MultiHeadAttention(num_heads=8, in_features=hidden_dim, out_features=hidden_dim, rngs=rngs)
+        self.norm1 = nnx.LayerNorm(hidden_dim, rngs=rngs)
+        self.ffn = MLP(hidden_dim, hidden_dim, rngs=rngs)
+        self.norm2 = nnx.LayerNorm(hidden_dim, rngs=rngs)
 
     def __call__(self, visual_tokens, state_tokens):
         kv = jnp.concatenate([visual_tokens, state_tokens], axis=1)
-        batch_size = visual_tokens.shape[0]
-        q = jnp.broadcast_to(self.force_query.value, (batch_size, 1, kv.shape[-1]))
-        force_token = self.cross_attn(inputs_q=q, inputs_kv=kv)
-        predicted_force = self.decoder(force_token[:, 0, :])
-        return force_token, predicted_force
+        batch_shape = visual_tokens.shape[:-2]
+        q = jnp.broadcast_to(self.force_query.value, (*batch_shape, 1, kv.shape[-1]))
+        attn_out = self.cross_attn(q, kv)
+        x = q + attn_out
+        x = self.norm1(x)
+        ffn_out = self.ffn(x)
+        force_token_pred = x + ffn_out
+        force_token_pred = self.norm2(force_token_pred)
+        return force_token_pred
 
 
 class Pi0(_model.BaseModel):
@@ -116,13 +134,13 @@ class Pi0(_model.BaseModel):
         self.force_mode = getattr(config, "force_mode", "none")
 
         if self.force_mode == "fdm":
-            self.fdm_state_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
+            self.fdm_state_proj = MLP(config.action_dim, action_expert_config.width, rngs=rngs)
+            self.actual_force_proj = MLP(6, action_expert_config.width, rngs=rngs)
             self.fdm = ForceDistillationModule(hidden_dim=action_expert_config.width, rngs=rngs)
 
         elif self.force_mode == "raw":
-            self.raw_force_proj = nnx.Linear(6, action_expert_config.width, rngs=rngs)
+            self.raw_force_proj = MLP(6, action_expert_config.width, rngs=rngs)
 
-        # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
 
     @at.typecheck
@@ -155,26 +173,37 @@ class Pi0(_model.BaseModel):
             # full attention between image and language inputs
             ar_mask += [False] * tokenized_inputs.shape[1]
 
-        predicted_force = None
-        force_token=None
+        pred_force_token = None
+        actual_force_token = None
+        vlm_force_token = None
 
         if self.force_mode == "fdm":
             state_tokens_fdm = self.fdm_state_proj(obs.state)[:, None, :]
             all_image_tokens = jnp.concatenate(image_tokens_list, axis=1) if image_tokens_list else jnp.zeros_like(state_tokens_fdm)
-            force_token, predicted_force = self.fdm(all_image_tokens, state_tokens_fdm)
+            pred_force_token = self.fdm(all_image_tokens, state_tokens_fdm)
+
+            if hasattr(obs, "force") and obs.force is not None:
+                actual_force_token = self.actual_force_proj(obs.force)[:, None, :]
+
+            vlm_force_token = pred_force_token
+
+            if getattr(self, "use_actual_force_for_vlm", False) and actual_force_token is not None:
+                vlm_force_token = actual_force_token
 
         elif self.force_mode == "raw" and hasattr(obs, "force") and obs.force is not None:
-            force_token = self.raw_force_proj(obs.force)[:, None, :]
+            vlm_force_token = self.raw_force_proj(obs.force)[:, None, :]
 
-        if force_token is not None:
-            tokens.append(force_token)
-            input_mask.append(jnp.ones((force_token.shape[0], 1), dtype=jnp.bool_))
+        if vlm_force_token is not None:
+            tokens.append(vlm_force_token)
+            input_mask.append(jnp.ones((vlm_force_token.shape[0], 1), dtype=jnp.bool_))
             ar_mask += [True]
 
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
-        return tokens, input_mask, ar_mask, predicted_force
+        
+        # 返回值保持 5 个不变，compute_loss 那边完全不用改！
+        return tokens, input_mask, ar_mask, pred_force_token, actual_force_token
 
     @at.typecheck
     def embed_suffix(
@@ -238,7 +267,7 @@ class Pi0(_model.BaseModel):
         u_t = noise - actions
 
         # one big forward pass of prefix + suffix at once
-        prefix_tokens, prefix_mask, prefix_ar_mask, predicted_force = self.embed_prefix(observation)
+        prefix_tokens, prefix_mask, prefix_ar_mask, pred_force_token, actual_force_token = self.embed_prefix(observation)
         suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(observation, x_t, time)
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
         ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask], axis=0)
@@ -248,13 +277,13 @@ class Pi0(_model.BaseModel):
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
         action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        fdm_loss = 0.0
 
-        if self.force_mode == "fdm" and predicted_force is not None and hasattr(observation, "force") and observation.force is not None:
-            fdm_loss = jnp.mean(jnp.square(predicted_force - observation.force), axis=-1)
-            total_loss = action_loss + self.force_loss_weight * fdm_loss[..., None]
-            return total_loss
+        if self.force_mode == "fdm" and pred_force_token is not None and hasattr(observation, "force") and observation.force is not None:
+            fdm_loss = jnp.mean(jnp.square(pred_force_token - actual_force_token), axis=-1)
+        total_loss = action_loss + self.force_loss_weight * fdm_loss[..., None]
 
-        return action_loss
+        return total_loss
 
     @override
     def sample_actions(
@@ -274,7 +303,7 @@ class Pi0(_model.BaseModel):
             noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
 
         # first fill KV cache with a forward pass of the prefix
-        prefix_tokens, prefix_mask, prefix_ar_mask, predicted_force = self.embed_prefix(observation)
+        prefix_tokens, prefix_mask, prefix_ar_mask, pred_force_token, _ = self.embed_prefix(observation)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
@@ -321,5 +350,4 @@ class Pi0(_model.BaseModel):
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
         return {
             "actions": x_0,
-            "predicted_force": predicted_force
         }
