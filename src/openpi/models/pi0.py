@@ -84,8 +84,8 @@ class ForceDistillationModule(nnx.Module):
     def __call__(self, visual_tokens, state_tokens):
         kv = jnp.concatenate([visual_tokens, state_tokens], axis=1)
         batch_shape = visual_tokens.shape[:-2]
-        q = jnp.broadcast_to(self.force_query.value, (*batch_shape, 1, kv.shape[-1]))
-        attn_out = self.cross_attn(q, kv)
+        q = jnp.broadcast_to(self.force_query.value, (*batch_shape, 1, self.force_query.value.shape[-1]))
+        attn_out = self.cross_attn(q, kv, decode=False)
         x = q + attn_out
         x = self.norm1(x)
         ffn_out = self.ffn(x)
@@ -134,9 +134,9 @@ class Pi0(_model.BaseModel):
         self.force_mode = getattr(config, "force_mode", "none")
 
         if self.force_mode == "fdm":
-            self.fdm_state_proj = MLP(config.action_dim, action_expert_config.width, rngs=rngs)
-            self.actual_force_proj = MLP(6, action_expert_config.width, rngs=rngs)
-            self.fdm = ForceDistillationModule(hidden_dim=action_expert_config.width, rngs=rngs)
+            self.fdm_state_proj = MLP(config.action_dim, paligemma_config.width, rngs=rngs)
+            self.actual_force_proj = MLP(6, paligemma_config.width, rngs=rngs)
+            self.fdm = ForceDistillationModule(hidden_dim=paligemma_config.width, rngs=rngs)
 
         elif self.force_mode == "raw":
             self.raw_force_proj = MLP(6, action_expert_config.width, rngs=rngs)
@@ -144,7 +144,7 @@ class Pi0(_model.BaseModel):
         self.deterministic = True
 
     @at.typecheck
-    def embed_prefix(self, obs: _model.Observation) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
+    def embed_prefix(self, obs: _model.Observation) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"], at.Float[at.Array, "b 1 emb"] | None, at.Float[at.Array, "b 1 emb"] | None]:
         input_mask = []
         ar_mask = []
         tokens = []
@@ -277,11 +277,13 @@ class Pi0(_model.BaseModel):
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
         action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
-        fdm_loss = 0.0
+        fdm_loss = jnp.zeros_like(action_loss)
 
-        if self.force_mode == "fdm" and pred_force_token is not None and hasattr(observation, "force") and observation.force is not None:
-            fdm_loss = jnp.mean(jnp.square(pred_force_token - actual_force_token), axis=-1)
-        total_loss = action_loss + self.force_loss_weight * fdm_loss[..., None]
+        if self.force_mode == "fdm" and pred_force_token is not None and actual_force_token is not None and hasattr(observation, "force") and observation.force is not None:
+            fdm_loss_per_ex = jnp.mean(jnp.square(pred_force_token - actual_force_token),axis=-1)
+            fdm_loss = jnp.broadcast_to(fdm_loss_per_ex, action_loss.shape)
+
+        total_loss = action_loss + self.force_loss_weight * fdm_loss
 
         return total_loss
 
