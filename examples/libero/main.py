@@ -44,6 +44,8 @@ class Args:
 
     seed: int = 7  # Random Seed (for reproducibility)
 
+    force_mode: str = "real"  # 可选: "real" (使用真实力) 或 "dummy" (全部置零模拟无传感器)
+
 
 def eval_libero(args: Args) -> None:
     # Set random seed
@@ -125,6 +127,16 @@ def eval_libero(args: Args) -> None:
                     replay_images.append(img)
 
                     if not action_plan:
+                        force = env.robots[0].ee_force  # (Fx, Fy, Fz)
+                        torque = env.robots[0].ee_torque  # (Tx, Ty, Tz)
+
+                        if args.force_mode == "real":
+                            eef_wrench = np.concatenate([force, torque], axis=-1).astype(np.float32)
+                        elif args.force_mode == "dummy":
+                            eef_wrench = np.zeros(6, dtype=np.float32)
+                        else:
+                            raise ValueError(f"未知的 force_mode: {args.force_mode}")
+
                         # Finished executing previous action chunk -- compute new chunk
                         # Prepare observations dict
                         element = {
@@ -137,6 +149,7 @@ def eval_libero(args: Args) -> None:
                                     obs["robot0_gripper_qpos"],
                                 )
                             ),
+                            "observation/force": eef_wrench,
                             "prompt": str(task_description),
                         }
 

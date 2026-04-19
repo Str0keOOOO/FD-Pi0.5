@@ -350,6 +350,4 @@ class Pi0(_model.BaseModel):
             return time >= -dt / 2
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
-        return {
-            "actions": x_0,
-        }
+        return x_0
