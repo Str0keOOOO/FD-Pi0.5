@@ -41,7 +41,7 @@ class Pi0Config(_model.BaseModelConfig):
     # ==========================================
     force_mode: str = "none"
     use_actual_force_for_vlm: bool = False
-    force_loss_weight: float = 10.0
+    force_loss_weight: float = 0.005
 
     def __post_init__(self):
         if self.max_token_len is None:

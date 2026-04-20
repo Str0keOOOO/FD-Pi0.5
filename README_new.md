@@ -78,12 +78,12 @@ python examples/libero/convert_libero_data_to_lerobot.py \
 不用 LoRA（直接进行模块化全量微调）
 
 ```bash
-uv run scripts/compute_norm_stats.py pi05_libero_fdm
+uv run scripts/compute_norm_stats.py --config-name=pi05_libero_fdm_sensor_free
 ```
 
 ```bash
 export WANDB_API_KEY=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
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_libero_fdm_wo --exp-name=pi05_libero_fdm_wo --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_libero_fdm_sensor_free --exp-name=pi05_libero_fdm_sensor_free --overwrite
 ```
 
 # 实验验证
@@ -101,30 +101,59 @@ export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
 ## pi05_libero_fdm_wo 
 
 ```bash
-MUJOCO_GL=glx python examples/libero/main.py python examples/libero/main.py --force_mode real --task_suite_name libero_10
+MUJOCO_GL=glx python examples/libero/main.py --args.force-mode real --args.task-suite-name libero_10
 ```
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_wo --policy.dir /你的/绝对/路径/checkpoints/pi05_libero_fdm_wo/xxx
+uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_wo --policy.dir /root/autodl-tmp/FD-Pi0.5/checkpoints/pi05_libero_fdm_wo/pi05_libero_fdm_wo/29000
 ```
 
 ## pi05_libero_fdm_sensor_free
 
 ```bash
-python examples/libero/main.py --force_mode dummy --task_suite_name libero_10
+MUJOCO_GL=glx python examples/libero/main.py --args.force-mode dummy --args.task-suite-name libero_10
 ```
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_sensor_free --policy.dir /你的/绝对/路径/checkpoints/pi05_libero_fdm_sensor_free/xxx
+uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_sensor_free --policy.dir /root/autodl-tmp/FD-Pi0.5/checkpoints/pi05_libero_fdm_sensor_free/pi05_libero_fdm_sensor_free/29999
 ```
 
-## pi05_libero_fdm_wo 
+## pi05_libero_fdm_upper_bound 
 
 ```bash
-python examples/libero/main.py --force_mode real --task_suite_name libero_10
+python examples/libero/main.py --args.force-mode real --args.task-suite-name libero_10
 ```
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_upper_bound --policy.dir /你的/绝对/路径/checkpoints/pi05_libero_fdm_upper_bound/xxx
+uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_upper_bound --policy.dir /root/autodl-tmp/FD-Pi0.5/checkpoints/pi05_libero_fdm_wo/pi05_libero_fdm_wo/29000
+```
+
+# 注意事项
+
+## 图像翻转
+
+因为在制作数据集的时候翻转图像
+
+```bash
+images = np.stack(
+                    [
+                        np.asarray(
+                            Image.fromarray(frame.astype(np.uint8)[::-1, ::-1]).resize((256, 256), resample=Image.BILINEAR),
+                            dtype=np.uint8,
+                        )
+                        for frame in images
+                    ],
+                    axis=0,
+                )
+                wrist_images = np.stack(
+                    [
+                        np.asarray(
+                            Image.fromarray(frame.astype(np.uint8)[::-1, ::-1]).resize((256, 256), resample=Image.BILINEAR),
+                            dtype=np.uint8,
+                        )
+                        for frame in wrist_images
+                    ],
+                    axis=0,
+                )
 ```
 

@@ -258,7 +258,6 @@ class Pi0(_model.BaseModel):
     def compute_loss(self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False) -> at.Float[at.Array, "*b ah"]:
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
-
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)
         time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
@@ -282,7 +281,6 @@ class Pi0(_model.BaseModel):
         if self.force_mode == "fdm" and pred_force_token is not None and actual_force_token is not None and hasattr(observation, "force") and observation.force is not None:
             fdm_loss_per_ex = jnp.mean(jnp.square(pred_force_token - actual_force_token),axis=-1)
             fdm_loss = jnp.broadcast_to(fdm_loss_per_ex, action_loss.shape)
-
         total_loss = action_loss + self.force_loss_weight * fdm_loss
 
         return total_loss

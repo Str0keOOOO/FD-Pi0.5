@@ -68,7 +68,7 @@ def main(input_dir: str, output_dir: str):
                 images = np.stack(
                     [
                         np.asarray(
-                            Image.fromarray(frame.astype(np.uint8)).resize((256, 256), resample=Image.BILINEAR),
+                            Image.fromarray(frame.astype(np.uint8)[::-1, ::-1]).resize((256, 256), resample=Image.BILINEAR),
                             dtype=np.uint8,
                         )
                         for frame in images
@@ -78,7 +78,7 @@ def main(input_dir: str, output_dir: str):
                 wrist_images = np.stack(
                     [
                         np.asarray(
-                            Image.fromarray(frame.astype(np.uint8)).resize((256, 256), resample=Image.BILINEAR),
+                            Image.fromarray(frame.astype(np.uint8)[::-1, ::-1]).resize((256, 256), resample=Image.BILINEAR),
                             dtype=np.uint8,
                         )
                         for frame in wrist_images
