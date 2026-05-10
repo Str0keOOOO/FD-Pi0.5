@@ -201,8 +201,7 @@ class Pi0(_model.BaseModel):
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
-        
-        # 返回值保持 5 个不变，compute_loss 那边完全不用改！
+
         return tokens, input_mask, ar_mask, pred_force_token, actual_force_token
 
     @at.typecheck

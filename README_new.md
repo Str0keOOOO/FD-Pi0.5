@@ -101,7 +101,7 @@ export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
 ## pi05_libero_fdm_wo 
 
 ```bash
-MUJOCO_GL=glx python examples/libero/main.py --args.force-mode real --args.task-suite-name libero_10
+ MUJOCO_GL=glx python examples/libero/main.py --args.force-mode real --args.task-suite-name libero_10 2>&1 | tee eval_log.txt
 ```
 
 ```bash
@@ -111,7 +111,7 @@ uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm
 ## pi05_libero_fdm_sensor_free
 
 ```bash
-MUJOCO_GL=glx python examples/libero/main.py --args.force-mode dummy --args.task-suite-name libero_10
+MUJOCO_GL=glx python examples/libero/main.py --args.force-mode dummy --args.task-suite-name libero_10 2>&1 | tee eval_log.txt
 ```
 
 ```bash
@@ -121,11 +121,11 @@ uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm
 ## pi05_libero_fdm_upper_bound 
 
 ```bash
-python examples/libero/main.py --args.force-mode real --args.task-suite-name libero_10
+MUJOCO_GL=glx python examples/libero/main.py --args.force-mode real --args.task-suite-name libero_10 2>&1 | tee eval_log.txt
 ```
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_upper_bound --policy.dir /root/autodl-tmp/FD-Pi0.5/checkpoints/pi05_libero_fdm_wo/pi05_libero_fdm_wo/29000
+uv run scripts/serve_policy.py policy:checkpoint --policy.config pi05_libero_fdm_upper_bound --policy.dir /root/autodl-tmp/FD-Pi0.5/checkpoints/pi05_libero_fdm_sensor_free/pi05_libero_fdm_sensor_free/29999
 ```
 
 # 注意事项
@@ -157,3 +157,6 @@ images = np.stack(
                 )
 ```
 
+# 根据commit查看修改了哪些内容
+
+git diff fdc03f527881cdfc8ae1a168ed6a20c60edbbbcc即可或者用gitlens查看
